@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
@@ -19,15 +20,19 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Falha no login');
-      }
+
       const data = await response.json();
-      login(data.token);
-      router.push('/');
-    } catch (err: any) {
-      setError(err.message);
+
+      if (response.ok) {
+        // Se a resposta for bem-sucedida, salva o token e redireciona
+        login(data.token);
+        router.push('/');
+      } else {
+        // Se a resposta for um erro, exibe a mensagem do servidor
+        setError(data.error || 'Falha no login');
+      }
+    } catch (err) {
+      setError('Erro de conexão com o servidor.');
     }
   };
 
