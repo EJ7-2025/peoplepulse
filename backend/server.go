@@ -42,12 +42,18 @@ type KPI struct {
 
 func initializeDatabase() {
 	db, err := sql.Open("postgres", connStr)
-	if err != nil { log.Fatal("Falha ao conectar ao DB para inicialização: ", err) }
+	if err != nil {
+		log.Fatal("Falha ao conectar ao DB para inicialização: ", err)
+	}
 	defer db.Close()
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, position VARCHAR(100), role VARCHAR(50));`)
-	if err != nil { log.Fatal("Falha ao criar tabela users: ", err) }
+	if err != nil {
+		log.Fatal("Falha ao criar tabela users: ", err)
+	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS kpis (id SERIAL PRIMARY KEY, title VARCHAR(100) NOT NULL, value INT NOT NULL, user_id INT NOT NULL, CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);`)
-	if err != nil { log.Fatal("Falha ao criar tabela kpis: ", err) }
+	if err != nil {
+		log.Fatal("Falha ao criar tabela kpis: ", err)
+	}
 	var userCount int
 	db.QueryRow("SELECT COUNT(*) FROM users WHERE email = $1", "edgard@peoplepulse.com.br").Scan(&userCount)
 	if userCount == 0 {
@@ -56,9 +62,13 @@ func initializeDatabase() {
 		hashedPassword, _ := bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
 		var insertedUserID int
 		err = db.QueryRow("INSERT INTO users (name, email, password_hash, position, role) VALUES ($1, $2, $3, $4, $5) RETURNING id", "Edgard Masso", "edgard@peoplepulse.com.br", string(hashedPassword), "Diretor", "diretoria").Scan(&insertedUserID)
-		if err != nil { log.Fatal("Falha ao inserir usuário de teste: ", err) }
+		if err != nil {
+			log.Fatal("Falha ao inserir usuário de teste: ", err)
+		}
 		_, err = db.Exec("INSERT INTO kpis (title, value, user_id) VALUES ('Resolução de Tickets', 85, $1), ('Commits no Repositório', 60, $1)", insertedUserID)
-		if err != nil { log.Fatal("Falha ao inserir KPIs de teste: ", err) }
+		if err != nil {
+			log.Fatal("Falha ao inserir KPIs de teste: ", err)
+		}
 		log.Println("Usuário de teste e KPIs criados com sucesso.")
 	} else {
 		log.Println("Banco de dados já inicializado.")
@@ -67,12 +77,22 @@ func initializeDatabase() {
 
 func Login(c *gin.Context) {
 	var creds LoginCredentials
-	if err := c.ShouldBindJSON(&creds); err != nil { c.JSON(http.StatusBadRequest, gin.H{"error": "Requisição inválida"}); return }
-	db, _ := sql.Open("postgres", connStr); defer db.Close()
+	if err := c.ShouldBindJSON(&creds); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Requisição inválida"})
+		return
+	}
+	db, _ := sql.Open("postgres", connStr)
+	defer db.Close()
 	var user User
 	err := db.QueryRow("SELECT id, name, email, password_hash, position, role FROM users WHERE email = $1", creds.Email).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &user.Position, &user.Role)
-	if err != nil { c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"}); return }
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(creds.Password)); err != nil { c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"}); return }
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"})
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(creds.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"})
+		return
+	}
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{UserID: user.ID, Role: user.Role.String, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(expirationTime)}}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -81,20 +101,43 @@ func Login(c *gin.Context) {
 }
 
 func GetKPIs(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization"); if authHeader == "" { c.JSON(http.StatusUnauthorized, gin.H{"error": "Cabeçalho de autorização não fornecido"}); return }
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Cabeçalho de autorização não fornecido"})
+		return
+	}
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) { return jwtKey, nil })
-	if err != nil || !token.Valid { c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"}); return }
-	db, _ := sql.Open("postgres", connStr); defer db.Close()
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
+		return
+	}
+	db, _ := sql.Open("postgres", connStr)
+	defer db.Close()
 	rows, err := db.Query("SELECT id, title, value FROM kpis WHERE user_id = $1", claims.UserID)
-	if err != nil { c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar KPIs"}); return }
-	defer rows.Close(); var kpis []KPI
-	for rows.Next() { var k KPI; if err := rows.Scan(&k.ID, &k.Title, &k.Value); err != nil { c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao processar dados dos KPIs"}); return }; kpis = append(kpis, k) }
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar KPIs"})
+		return
+	}
+	defer rows.Close()
+	var kpis []KPI
+	for rows.Next() {
+		var k KPI
+		if err := rows.Scan(&k.ID, &k.Title, &k.Value); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao processar dados dos KPIs"})
+			return
+		}
+		kpis = append(kpis, k)
+	}
 	c.IndentedJSON(http.StatusOK, kpis)
 }
 
 func main() {
 	initializeDatabase()
-	router := gin.Default(); router.Use(cors.Default()); router.POST("/login", Login); router.GET("/kpis", GetKPIs); router.Run(":8080")
+	router := gin.Default()
+	router.Use(cors.Default())
+	router.POST("/login", Login)
+	router.GET("/kpis", GetKPIs)
+	router.Run(":8080")
 }
