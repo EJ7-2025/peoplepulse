@@ -15,10 +15,11 @@ import (
 )
 
 var jwtKey = []byte("sua_chave_secreta_super_secreta")
-// Definindo a string de conexão como uma variável global para consistência
 var connStr = "user=admin password=admin dbname=peoplepulse_db host=localhost sslmode=disable"
 
-type User struct { ID int; Name string; Email string; PasswordHash string `json:"-"`; Position sql.NullString; Role sql.NullString }
+type User struct {
+    ID           int; Name         string; Email        string; PasswordHash string; Position     sql.NullString; Role         sql.NullString
+}
 type LoginCredentials struct { Email string `json:"email"`; Password string `json:"password"` }
 type Claims struct { UserID int; Role string; jwt.RegisteredClaims }
 type KPI struct { ID int `json:"id"`; Title string `json:"title"`; Value int `json:"value"` }
@@ -27,7 +28,21 @@ func initializeDatabase() {
 	db, err := sql.Open("postgres", connStr)
 	if err != nil { log.Fatal("Falha ao conectar ao DB para inicialização: ", err) }
 	defer db.Close()
-	// ... (Restante do código de inicialização)
+	db.Exec(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(100) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, position VARCHAR(100), role VARCHAR(50));`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS kpis (id SERIAL PRIMARY KEY, title VARCHAR(100) NOT NULL, value INT NOT NULL, user_id INT NOT NULL, CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);`)
+	var userCount int
+	db.QueryRow("SELECT COUNT(*) FROM users WHERE email = $1", "edgard@peoplepulse.com.br").Scan(&userCount)
+	if userCount == 0 {
+		log.Println("Usuário de teste não encontrado, criando...")
+		password := []byte("12345")
+		hashedPassword, _ := bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
+		var insertedUserID int
+		db.QueryRow("INSERT INTO users (name, email, password_hash, position, role) VALUES ($1, $2, $3, $4, $5) RETURNING id", "Edgard Masso", "edgard@peoplepulse.com.br", string(hashedPassword), "Diretor", "diretoria").Scan(&insertedUserID)
+		db.Exec("INSERT INTO kpis (title, value, user_id) VALUES ('Resolução de Tickets', 85, $1), ('Commits no Repositório', 60, $1)", insertedUserID)
+		log.Println("Usuário de teste e KPIs criados com sucesso.")
+	} else {
+		log.Println("Banco de dados já inicializado.")
+	}
 }
 
 func Login(c *gin.Context) {
@@ -39,7 +54,7 @@ func Login(c *gin.Context) {
 	if err != nil { c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"}); return }
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(creds.Password)); err != nil { c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"}); return }
 	expirationTime := time.Now().Add(24 * time.Hour)
-	claims := &Claims{ UserID: user.ID, Role: user.Role.String, RegisteredClaims: jwt.RegisteredClaims{ ExpiresAt: jwt.NewNumericDate(expirationTime) }}
+	claims := &Claims{UserID: user.ID, Role: user.Role.String, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(expirationTime)}}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, _ := token.SignedString(jwtKey)
 	c.JSON(http.StatusOK, gin.H{"token": tokenString, "role": user.Role.String})
